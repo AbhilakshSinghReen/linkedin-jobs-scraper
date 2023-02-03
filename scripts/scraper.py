@@ -1,8 +1,13 @@
 from bs4 import BeautifulSoup
 from urllib.parse import urlsplit
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 
+start_date_str = "2023-01-29"
+prev_scraped_file_path = "Worldwide Remote Internship - 2023-01-31.csv"
+save_file_path = f'Software Engineer Internship Worldwide Remote - {date.today()}.csv'
+
+start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
 
 def get_soup_from_file(file_path):
     soup = ''
@@ -18,12 +23,23 @@ def trim_url_to_remove_query_parameters(url):
 
 
 if __name__ == "__main__":
-    soup = get_soup_from_file("Worldwide Remote Internship - 2023-01-17.html")
+    avoided_due_to_date_count = 0
+    parsed_new_count = 0
+    parsed_old_count = 0
+    
+    # Read old CSV
+    df = pd.read_csv(prev_scraped_file_path)
+    extracted_jobs = df.to_dict("records")
+    parsed_old_count = len(extracted_jobs)
+
+    soup = get_soup_from_file("target.html")
 
     job_cards = soup.find_all('div', class_='base-card')
     print(f"Number of jobs scraped: {len(job_cards)}")
 
-    extracted_jobs = []
+    
+
+    # extracted_jobs = []
     for job_card in job_cards:
         # company name, job title, location, date posted, job link
         job_details = {
@@ -31,7 +47,8 @@ if __name__ == "__main__":
             'role': '',
             'location': '',
             'datePosted':'',
-            'link':''
+            'link':'',
+            'checked': 0,
         }
 
         card_subtitle_tag = job_card.find('h4', class_='base-search-card__subtitle')
@@ -72,18 +89,64 @@ if __name__ == "__main__":
         else:
             continue
 
+
+        # If date < start date, don't add
+        job_date = datetime.strptime(job_details['datePosted'], "%Y-%m-%d")
+
+        if job_date < start_date:
+            avoided_due_to_date_count += 1
+            continue
+
+
         extracted_jobs.append(job_details)
+        parsed_new_count += 1
 
-    print(f"Number of jobs parsed successfully: {len(extracted_jobs)}")
+    print(f"Number of old jobs loaded: {parsed_old_count}")
+    print(f"Number of new jobs parsed successfully: {parsed_new_count}")
+    print(f"Number of jobs avoided due to date: {avoided_due_to_date_count}")
+
+    # De duplicate extracted jobs, unique key is link
+    # On duplicate, set checked to 1 if either one had checked set to 1
+    extracted_jobs = sorted(extracted_jobs, key=lambda d: d['link']) 
+
+    deduped_extracted_jobs = []
+
+    i = 0
+    while i < (len(extracted_jobs) - 1):
+        if (extracted_jobs[i]['link'] != extracted_jobs[i + 1]['link']):
+            # No problem, just add
+            deduped_extracted_jobs.append(extracted_jobs[i])
+            i += 1
+        else:
+            checked = 0
+
+            j = i
+            while (j < len(extracted_jobs) and extracted_jobs[j]['link'] == extracted_jobs[i]['link']):
+                checked += extracted_jobs[j]['checked']
+                j += 1
+            
+            # Add only 1
+            if checked > 0:
+                checked = 1
+
+            deduped_extracted_jobs.append(extracted_jobs[i])
+            deduped_extracted_jobs[-1]['checked'] = checked
+            
+            i = j
     
-    extracted_jobs = sorted(extracted_jobs, key=lambda x: datetime.strptime(x['datePosted'], '%Y-%m-%d'))
+    if len(extracted_jobs) > 0:
+        if len(deduped_extracted_jobs) == 0:
+            deduped_extracted_jobs.append(extracted_jobs[-1])
+        elif deduped_extracted_jobs[-1]['link'] != extracted_jobs[-1]['link']:
+            deduped_extracted_jobs.append(extracted_jobs[-1])
+
+        pass
 
 
-    # Add the checked column
-    for job in extracted_jobs:
-        job['checked'] = 0
+    
+    deduped_extracted_jobs = sorted(deduped_extracted_jobs, key=lambda x: datetime.strptime(x['datePosted'], '%Y-%m-%d'))
 
     # Save into CSV
-    df = pd.DataFrame(extracted_jobs)
-    df.to_csv('Worldwide Remote Internship - 2023-01-17.csv', index=False)
+    df = pd.DataFrame(deduped_extracted_jobs)
+    df.to_csv(save_file_path, index=False)
     
